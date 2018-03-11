@@ -148,3 +148,4 @@ coding: utf-8
 	* 更新: usr/local/bin/conky-weather-add-crontab 2.0
   	  如果已存在 ~/conky/86conky-weather-update.cron 计划任务示例文件，
   	  则直接使用这个文件，而不再是重新生成文件（取消无意义的文件写入操作）；  	  
+
