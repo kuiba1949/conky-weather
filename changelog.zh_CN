@@ -1,0 +1,226 @@
+ChangeLog for conky-weather 
+coding: utf-8
+
+* version 2.4.1, 2018-3-11, by Careone
+
+
+	* 托管地址转移到 Github 。
+	  之前放在 SourceForge, 有时会无法正常下载和上传文件；
+	  原项目网址: 
+	  https://sourceforge.net/projects/emacslocale/files/conky-weather/
+	  
+	  新的项目网址:
+	  https://github.com/kuiba1949/conky-weather/
+	  
+	* 授权协议使用BSD三言许可协议。为适应当前协议，移除了部分可能引起争议的文件:
+
+	** 移除了 usr/share/conky-weather/pixmaps/moji-weather/ 目录下的天气图片。
+	   图片来自墨迹天气 https://tianqi.moji.com; 
+	   
+	** 移除了 etc/conky/themes/madness/conkyrc 文件；
+
+
+* version 2.4, 2018-3-11, by Careone
+
+	* 修复: 天气图片无法显示的缺陷；
+	  原因：程序无法自动创建用户目录 $PIC_DIR，即 ~/conky/moji-weather/，
+	  另外自动下载天气图片的相关代码有缺陷（见 TAG 374）；
+	  临时解决方案：手动创建目录 ~/conky/moji-weather/ 即可；
+
+	* 新选项: --auto  启用 [自动漫游] 模式。即按IP地址定位城市后，
+                   再更新天气。默认使用这种模式。
+		   	
+	* 新选项: --logcity  启用 [城市备份] 功能。如果更新天气时发现城市地址
+          有变更，则自动备份新的天气网址到文件 ~/conky/conky-weather.autocity
+
+	* 其它细节微调，代码优化；
+
+
+* version 2.3, 2018-3-08, by Careone
+	
+	* 新增选项: --ip2city 
+	  根据IP地址，自动定位城市和天气网页地址；
+	  定位过程中需要联网，IP地址数据来自 https://ip.cn
+
+	* 其它细节微调，代码优化；
+
+
+* version 2.2, 2018-3-05, by Careone
+	
+	* 新增功能: 支持显示天气图片。图片目录位置: 
+	 /usr/share/conky-weather/pixmaps/moji-weather/；
+
+	* 新增功能: 支持在conky中显示提醒信息（实际操作即读取文件 ~/conky/todo.txt
+	  的内容。最多只显示5行，防止文件行数太多，导致conky其它信息无法正常显示）;
+	  
+  	* 更新: /usr/local/bin/conky-weather-update ver 2.1 -> 2.2
+
+	** 修复: 某些情况下，无法正常获取“城市/县城”字符数据，以及“明天”和“后天”的
+		天气数据无效的缺陷；
+	** 代码优化, 能更有效地解析天气数据; 
+
+	** 新增更多选项：
+	  --conkyrc 编辑conky配置文件 ~/.conkyrc
+	  --city  修改要显示天气的城市的网页地址(即修改配置文件
+		  ~/conky/conky-weather.cfg);
+	  --todo  可编辑要提醒的文字内容(即修改配置文件 ~/conky/todo.txt)；
+
+	* 更新: etc/etc/conky/themes/madness/conkyrc_mini
+  	 (注：本次未更新 etc/etc/conky/themes/madness/conkyrc ) 
+
+
+* version 2.1, 2018-3-03, by Careone
+	
+	* 更新: etc/etc/conky/themes/madness/conkyrc_mini
+
+	** 支持显示最三天内的天气（旧版本只显示今天的天气），
+	** 同时调整了天气数据的文件保存规则：
+	  现统一保存到单一的文件 ~/conky/conky-weather.db , 不再使用以前的多个文件：
+	  ~/.feed/feed_city, feed_ls, feed_xls, feed_wd ；
+	  
+  	* 更新: etc/etc/conky/themes/madness/conkyrc
+  	 （更新规则参照上面的 conkyrc_mini）
+  	 
+  	* 更新: /usr/local/bin/conky-weather-update, 优化代码，并删除了部分过期的代码； 
+  	
+  	* 更新: /usr/local/bin/conky-weather-add-crontab
+  	      和 /usr/local/bin/conky-weather.runonce
+  	天气更新频率由原来的1小时，变更为每20分钟更新一次；
+
+
+* version 2.0, 2018-2-07, by Careone
+
+	* 更新: DEB 格式软件包的源文件 DEBIAN/postinst
+	  安装完成后，会弹窗提示进行最后的设置，来修改城市数据、添加自动启动、
+	  自动更新天气; 
+
+	* 更新: /etc/conky/themes/madness/conkyrc_mini
+	  + 时间显示中，不再显示秒数(即取消了 $time 的 ":%S" 值)；
+	  + 更新时间间隔(update_interval)从1秒调整为5秒；
+
+	* 把原 README.zh_CN 分拆为两个文件: ChangeLog.zh_CN 和 README.zh_CN; 
+
+	* 更新: etc/conky/themes/madness/ChangeLog.zh_CN:
+	  + 修复了原 Changelog 部分，版本1.1，年份数字2018误写成20118的错误；
+
+	* 更新: usr/local/bin/conky-weather-update 2.0
+  	  添加 -w 和其它选项
+
+	* 更新: usr/local/bin/conky-weather-add-crontab 2.0
+  	  如果已存在 ~/conky/86conky-weather-update.cron 计划任务示例文件，
+  	  则直接使用这个文件，而不再是重新生成文件（取消无意义的文件写入操作）；
+
+
+* version 1.5, 2018-2-05, by Careone 
+
+	* 更新: /etc/conky/themes/madness/conkyrc_mini
+	  + 微调了“年月日，星期几”的居中对齐的代码 ${alignc}位置（前移）。
+	    之前的居中对齐代码的位置错误，无法实现居中效果；
+	
+	* 更新: /usr/local/bin/conky-weather-update 
+
+	  + 修复/优化了部分程序代码缺陷：
+	    数组 feedfile[@] 内的值更正为 feed_xls (之前误写为 feed-xls. 
+	    即下划线'_'误写为连字符'-');
+
+	  + 修复了第139行附近清空数组文件时，文件名缺失目录路径 $FEED_DIR 的缺陷； 
+
+	  + 微调了默认生成的配置文件 ~/conky/conky-weather.cfg 的内容，添加了对
+	    直辖市（如“中国/北京/北京”格式）的天气数据地址示例； 
+
+	* 更新: /usr/local/bin/conky-weather.runcone
+	  + 修复/优化了部分程序代码缺陷, 禁用了部分交叉的变量/数组定义和功能模块，
+	    完全移交给命令 conky-weather-update 单独执行；
+
+
+* version 1.4.1, 2018-2-04, by Careone 
+
+	* 更新: /etc/conky/themes/madness/conkyrc_mini
+	  + 城市名称的对齐方式调整：由默认的“左对齐”，调整为“居中对齐”；
+	
+	* 更新: /usr/local/bin/conky-weather-update
+	  + 优化了部分程序代码和输出文字的排版对齐效果；
+
+	* 更新: /usr/local/bin/conky-weather.runcone
+	  + 优化了部分程序代码和输出文字的排版对齐效果；
+	  + 每一步操作完成后，都会暂停3秒，用户能更方便地看到
+	    程序所做的具体内容；
+	
+
+* version 1.4, 2018-2-03, by Careone 
+
+	* 更新: /usr/local/bin/conky-weather-update
+		/usr/local/bin/conky-weather.runonce
+
+	  + 在这两个命令中，添加了开机自启动项 
+	    （开机后立即运行 conky-weather-update 更新一次天气）：
+	    ~/.config/autostart/86conky-weather-update.desktop；
+	  + 同时把 conky-weather.runonce 中预设的 conky 自启动项的
+	    文件名由 conky.desktop 变更为 90conky.desktop;
+	  + 调整了这两个命令中的部分函数名和代码细节；
+
+	* 添加：图标文件 /usr/share/pixmaps/conky-weather-update.png ; 
+	
+
+* version 1.3, 2018-2-02, by Careone 
+
+	* 变更：修改了个人自定义的城市天气地址页面文件的文件名及默认内容：
+	  原配置文件: ~/conky/www_city.txt
+	  新:         ~/conky/conky-weather.cfg
+	  
+	* 更新: /usr/local/bin/conky-weather-update
+	  缩短每次更新天气的所用的时间：从19秒缩短为2秒；
+	  同时取消了部分频繁写入、读取天气数据文件的操作；
+
+
+* version 1.2, 2018-2-01, updated by Careone 
+
+	* 新增: 用户可以在文件 ~/conky/conky-weather.cfg 中，输入指定城市/县城的
+	  天气网页地址, 来显示对应城市/县城的天气; 
+	
+	* 添加: 文件 README.zh_CN ( /etc/conky/themes/madness/README.zh_CN );
+
+  	* 添加: 命令 /usr/local/bin/conky-weather-theme.runonce
+  	  用于安装后自动更新/替换当前用户的 Conky 配置文件 ~/.conkyrc , 
+  	  并自动添加 conky 自启动运行、定时更新天气的指令（每小时更新一次）；
+  	  
+  	* 更新: /etc/conky/themes/madness/conkyrc_mini 配置文件，
+  	  现在 Conky天气中，会显示对应的城市名称；
+  	
+  	* 更新: /usr/local/bin/conky-weather-update
+
+  	* 更新: /usr/local/bin/conky-weather-add-crontab
+
+	  ------
+  	
+  	* DEB 打包相关变更:
+  	
+  	** 更新：在 control 文件中添加中文相关说明和使用方法；
+ 	
+	** 更新：postinst 安装脚本。安装完成后，会用 Conky 天气的配置文件
+	  （右上角对齐方式）/etc/conky/themes/madness/conkyrc_mini ，
+  	   替换 conky 自带的配置文件 /etc/conky/conky.conf .替换之前
+  	   会自动备份原 conky.conf 为 conky.conf.orig;
+
+  	** 添加：postrm 安装脚本。卸载完成后，会自动用备份文件 conky.conf.orig 
+  	   恢复 conky 自带的配置文件 /etc/conky/conky.conf；
+  	   
+		
+* version 1.1, 2018-1-31
+
+	原作者: madness, 2017.11 - 2018
+	修改/DEB打包人: Careone, 2018.1.31 
+
+	* 能以 conky 的方式，在屏幕右上角显示以下信息：
+	  + 时间（时/分/秒）；
+	  + 日期（年月日，星期几）；
+	  + 天气所在的城市，省份；
+	  + 天气相关数据，天气数据的更新时间；
+	  + 用户操作系统名称；
+	  + 用户操作系统内核版本；
+	  + 已开机运行时间（对笔记本电脑比较实用）
+	
+	* 添加：conky 图标文件 /usr/share/pixmaps/conky.png ;
+
+	* 添加：conky 快捷启动方式文件 /usr/share/applicarions/conky.desktop ;
+

@@ -1,0 +1,63 @@
+default_color white
+double_buffer yes
+no_buffers yes
+update_interval 5 # update_interval 1
+total_run_times 0
+own_window yes
+own_window_type normal
+own_window_transparent yes
+own_window_hints undecorated,below,sticky,skip_taskbar,skip_pager
+
+own_window_colour 000000
+own_window_argb_visual yes
+own_window_argb_value 0
+
+double_buffer yes
+draw_shades yes
+draw_outline no
+draw_borders no
+draw_graph_borders n0
+minimum_size 296 5
+maximum_width 406
+default_color ffffff
+default_shade_color 000000
+default_outline_color 000000
+alignment top_right
+gap_x 60
+gap_y 60 # gap_y 100
+cpu_avg_samples 2
+override_utf8_locale no
+uppercase no # set to yes if you want all text to be in uppercase
+use_spacer none
+use_xft yes
+xftfont WenQuanYi Zen Hei:pixelsize=12
+override_utf8_locale yes
+use_spacer none
+minimum_size 296 5
+TEXT
+${font LCD:style=Bold:pixelsize=50}${alignc}${time %H:%M}${font WenQuanYi Zen Hei:pixelsize=24}
+${alignc}${time %Y年%b%d日 星期%a}
+${hr}
+${font WenQuanYi Zen Hei:pixelsize=18}${alignc}${exec sed -n '3p' $HOME/conky/conky-weather.db}
+${font WenQuanYi Zen Hei:pixelsize=30}       ${exec sed -n '4p' $HOME/conky/conky-weather.db} ${font WenQuanYi Zen Hei:pixelsize=18}${exec sed -n '5p' $HOME/conky/conky-weather.db}
+${font WenQuanYi Zen Hei:pixelsize=14}${exec sed -n '6p' $HOME/conky/conky-weather.db}
+${exec sed -n '7p' $HOME/conky/conky-weather.db}
+${hr}
+${font WenQuanYi Zen Hei:pixelsize=18}${alignc}${exec sed -n '9p' $HOME/conky/conky-weather.db}
+${font WenQuanYi Zen Hei:pixelsize=18}             ${exec sed -n '10p' $HOME/conky/conky-weather.db} ${exec sed -n '11p' $HOME/conky/conky-weather.db} 
+             ${exec sed -n '12p' $HOME/conky/conky-weather.db} ${exec sed -n '13p' $HOME/conky/conky-weather.db}   空气质量: ${exec sed -n '14p' $HOME/conky/conky-weather.db}
+${hr}
+${font WenQuanYi Zen Hei:pixelsize=18}${alignc}${exec sed -n '16p' $HOME/conky/conky-weather.db}
+${font WenQuanYi Zen Hei:pixelsize=18}             ${exec sed -n '17p' $HOME/conky/conky-weather.db} ${exec sed -n '18p' $HOME/conky/conky-weather.db}
+             ${exec sed -n '19p' $HOME/conky/conky-weather.db} ${exec sed -n '20p' $HOME/conky/conky-weather.db}   空气质量: ${exec sed -n '21p' $HOME/conky/conky-weather.db}
+${hr}
+${font WenQuanYi Zen Hei:pixelsize=18}${alignc}[ 提醒 ]
+${exec head -5 $HOME/conky/todo.txt}
+${hr}${font WenQuanYi Zen Hei:pixelsize=14}
+${color #98c2c7}主机名: ${color}$alignr$nodename
+${color #98c2c7}内核:  ${color}$alignr$kernel
+${color #98c2c7}已开机: ${color}$alignr$uptime
+${image $HOME/conky/moji-weather/weather-day00.png -p -2,113 -s 60x60 -n}
+${image $HOME/conky/moji-weather/weather-day02.png -p -2,235 -s 60x60 -n} 
+${image $HOME/conky/moji-weather/weather-day03.png -p -2,325 -s 60x60 -n}
+
