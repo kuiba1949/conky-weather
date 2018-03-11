@@ -36,7 +36,6 @@ conky-weather
   注：以后每次开机后，或者每隔20分钟，都会自动更新Conky天气！
   (提示：也可以手动运行 conky-weather-update 立即更新天气！)
 
-
   -----------
 
 ChangeLog for conky-weather 
