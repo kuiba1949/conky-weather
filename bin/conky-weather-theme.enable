@@ -1,0 +1,66 @@
+#!/bin/bash
+# coding: utf-8
+
+# filename: conky-weather-theme.enable
+# original filename: conky-theme-madness.enable.sh
+#
+## 设定默认的 conky 主题为: madness
+#
+#  完成设置后，以后只要直接运行 conky 或者
+#  conky -d (以守护进程方式启动) 即可，不需要再次设置。
+#
+# 原始出处:
+#
+## 深度论坛: 
+#  首页 ›深度乐园 › 深度茶社 › deepin利用conky打造一个炫酷的桌面
+#  https://bbs.deepin.org/forum.php?mod=viewthread&tid=148009
+#  原作者： madness  2017-11-11
+#  modified by Careone, 2018-2-1
+
+APPNAME="conky-theme-madness"
+APPVERE="1.2"
+#THEME_CFG="/etc/conky/themes/madness/conkyrc"
+THEME_CFG="/etc/conky/themes/madness/conkyrc_mini"
+USER_CFG="$HOME/.conkyrc"
+
+USER_DIR01="$HOME/.feed"
+
+echo "启用conky主题：madness_mini"
+echo "  * 主题配置文件来源: $THEME_CFG"
+echo "  * 用户配置文件:     $USER_CFG"
+echo "    --------"
+
+echo "  * 备份并替换用户的Conky配置文件: $USER_CFG"
+
+if [ ! -d "$USER_DIR01" ]; then
+  mkdir -p "$USER_DIR01"
+fi
+
+if [ ! -e "$USER_CFG" ]; then
+  cp -v "$THEME_CFG" "$USER_CFG"
+else
+  cp --backup "$THEME_CFG" "$USER_CFG"
+fi
+
+echo "  * 重新启动 conky ..."
+
+#pkill conky
+conky &
+
+echo "  * OK."
+echo
+echo "  以后直接运行 conky 或者 conky -d (以守护进程方式启动) 即可，"
+echo "  不需要再次设置!"
+echo
+
+### --------
+#sudo chmod u+s /usr/sbin/hddtemp 
+#sudo sensors-detect
+#cd conky
+#sh setup.sh
+#sh setup.sh network
+
+### ========
+
+exit 0
+

@@ -1,0 +1,125 @@
+#/bin/bash
+# coding: utf-8
+# filename: conky-weather-add-crontab
+# add crontab for conky weather
+# 2018-3-03 updated, by Careone
+
+APPNAME="conky-weather-add-crontab"
+APPVER="2.1"
+
+BIN="conky-weather-update"
+CMD=`which $BIN`
+CRON_FILE="$HOME/conky/86conky-weather-update.cron"
+#CRON_ETC_DIR="/etc/cron.d"
+
+declare -i X Y Z
+
+if [ ! -d "$HOME/conky" ]; then
+  mkdir -p "$HOME/conky"
+fi
+
+echo "  * 设定自动更新 Conky天气 (每20分钟更新一次)..."
+echo "    提示：也可以随时运行 $BIN 来更新 Conky天气！"
+echo
+
+if [ "$CMD" = '' ]; then
+  echo "  Error: command '$BIN' not found."
+  echo "         nothing to do. Abort."
+  crontab -l
+  exit 0;
+fi
+
+## X = 0-19
+## 每个小时的第 X, X+20, X+40 分钟更新一次天气, 
+#  并添加到当前用户的 crontab 计划任务。
+#
+#  警告：
+#      	如果所有用户都在同一分钟更新天气，天气服务器可能会吃不消，
+#      	或反应太慢。所以使用了一个随机的分钟数字X：0-19,
+#	以分散服务器的更新压力　
+let "X = RANDOM % 20"
+let "Y = X + 20"
+let "Z = X + 40"
+
+#echo X = $X
+
+CRON_LINES=`crontab -l 2>/dev/null | wc -l`
+CRON_WEATHER_LINES=`crontab -l | grep "$BIN" | wc -l`
+
+# 如果用户的crontab 中没有任何的crontab 计划任务，
+# 或者仅有一条更新conky天气的 crontab 指令，则可以执行或更新后面的相关crontab指令；
+# 如果用户有1条或者多条与更新conky天气无关的指令，则需要用户手动添加crontab指令。
+# 这样做是为了避免错误地清空用户的其它crontab指令。
+  if [ "$CRON_LINES" = 0 ]; then
+    :
+  elif [ "$CRON_LINES" = 1 ] && [ "$CRON_WEATHER_LINES" = 1 ]; then
+    :
+  else
+    echo "  请把下面一行带星号*的指令, 添加到当前用户的 crontab 计划任务中:"
+    echo "  ( 命令操作: crontab -e )"
+　  echo "  $X * * * * $CMD "
+#　  echo "  30 * * * * /usr/local/bin/conkey-weather-update"
+    echo "  或者: 把文件 $CRON_FILE "
+    echo "  添加到当前用户的 crontab 计划任务目录。"
+    echo "  作用：每个小时的第$X分钟更新一次天气"
+#    echo "  作用：每个小时的第30分钟更新一次天气"
+    echo 
+    echo "  显示当前用户的 crontab 计划任务清单："
+    echo "  ( 命令操作: crontab -l )"
+    echo "  -------- "
+    crontab -l
+
+    exit 0
+  fi
+
+  if [ ! -e "${CRON_FILE}" ]; then
+    echo "$X,$Y,$Z * * * * $CMD" > "${CRON_FILE}"
+  else 
+    echo -e "  提示: 已存在Conky天气的 crontab 计划任务示例文件:\n  ${CRON_FILE}"
+    echo -e "  文件中的相关指令：\n"
+  fi
+
+    crontab "${CRON_FILE}"
+
+    crontab -l | grep "$BIN"
+  
+    echo "  含义：每个小时的第X分钟更新一次天气"
+  
+exit 0;
+
+### 以下内容是crontab的用法介绍, 不会执行任何代码或命令
+### ----------------
+# show current user's crontab job:
+# crontab -l
+#
+# ----
+## user crontab dir 1:
+# /var/spool/cron/
+# crontab job FILE for USER xxx: (root readable only)
+# /var/spool/cron/xxx 
+# ----
+## global crontab dir 2: 
+#/etc/crontab   //FILE
+#
+#/etc/cron.d/
+#/etc/cron.daily/
+#/etc/cron.hourly/
+#/etc/cron.monthly/
+#/etc/cron.weekly/
+# ---- 
+## crontab usage:
+# examples:
+# 45 * * * * /usr/local/bin/conky-weather-update
+# 15,45 * * * * /usr/local/bin/conky-weather-update
+# For details see man 4 crontabs
+#
+# Example of job definition:
+# .---------------- minute (0 - 59)
+# | .------------- hour (0 - 23)
+# | | .---------- day of month (1 - 31)
+# | | | .------- month (1 - 12) OR jan,feb,mar,apr ...
+# | | | | .---- day of week (0 - 6) (Sunday=0 or 7) OR sun,mon,tue,wed,thu,fri,sat
+# | | | | |
+# * * * * * user-name command to be executed. Must use FULL PATH and FILENAME!
+#
+### ----------------

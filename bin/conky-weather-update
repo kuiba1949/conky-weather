@@ -1,0 +1,1069 @@
+#!/bin/bash
+# coding: utf-8
+# auto feed/update conky weather data
+#
+## filename: conky-weather-update
+#  original filename: ~/.feed/feed.sh
+#
+# aurthor: madness, 2017.11 - 2018
+# updated by Careone, 2018.3.11
+# 支持显示3天内的天气 ( ver 2.1 及后续版本 )；
+# 支持显示天气图片 	 ( ver 2.2 及后续版本 )；
+# ----
+# 能通过IP地址，自动定位城市。定位过程需要联网 	 ( ver 2.3 及后续版本 )；
+#    老用户可以手动删除 ~/conky/conky-weather.cfg 文件来查看效果
+
+### HEAD ###
+APPNAME="conky-weather-update"
+APPVER="2.4"
+
+### debug switch ###
+DEBUG=0 # =1: show debug info; =0: never show
+
+CONKY_DIR="$HOME/conky"
+WEATHER_DATA="$CONKY_DIR/conky-weather.db"
+AUTOSTART_DIR="$HOME/.config/autostart"
+
+DEFAULT_PAGE="https://tianqi.moji.com"
+WEATHER_URL=""
+#WEATHER_URL="https://tianqi.moji.com"
+## examples:
+#WEATHER_URL="https://tianqi.moji.com/weather/china/hunan/changsha"
+#WEATHER_URL="https://tianqi.moji.com/weather/china/hubei/wuhan"
+#WEATHER_URL="https://tianqi.moji.com/weather/china/beijing/haidian-district"
+#WEATHER_URL="https://tianqi.moji.com/weather/china/beijing/beijing"
+
+## CW_CONKYRC: global Conky Weather conkyrc file
+CW_CONKYRC="/etc/conky/themes/madness/conkyrc_mini"
+
+  
+### for option --ip2city, --city; --custom, --auto and others
+# URL_MODE: 有2个可选的值: custom [自定义模式]，autocity [自动漫游模式]
+URL_MODE="custom" 
+
+## CITY_STR: 联网后根据IP地址分析出的城市名称，如：湖南省长沙市 
+CITY_STR=''
+
+## OLD_URL: 获取配置文件4 conky-weather.autocity 中的第一组有效天气网址
+OLD_URL=''
+ 
+### 联网异常时，对旧的天气数据的处理方案(见 TAG 815)：
+KEEP_DATA=0; 	# =1: 保留旧的天气数据（即不清空 conky-weather.db 文件）
+NEED_UPDATE=1  # =1: 需要更新天气	
+STR_ANYDAY=''
+STR_TODAY=''
+ 
+#USER_CITY_FILE="$CONKY_DIR/conky-weather.cfg"
+ # array cfg[@]: id: 0-3
+declare -a cfg=( conky-weather.cfg conky-weather.db todo.txt conky-weather.autocity )
+
+## 文件1: conky-weather.cfg: 用户自定义（即强制指定）的城市天气网页地址
+## 文件2: conky-weather.autocity: 联网后，根据当前IP地址，解析得到的本地天气网页地址
+#  
+# * 在 custom [自定义模式] 下：
+# 程序会先读取 文件1。如果 文件1 中缺少有效的数据，再读取和更新 文件2；
+# 说明: 如果读取到的数据是 https://tianqi.moji.com/weather ，则判定为这个地址是在
+# 联不上网络的情况下得到的，会自动忽略。下次更新时，仍然会重新获取并更新地址
+# 
+# * 在 autocity [自动漫游模式] 下：
+# 程序会先禁用 文件1 的所有有效数据，再读取和更新 文件2；
+#
+# 默认情况下，程序优先读取 文件1。只要用户没有手动修改 文件1,
+# 则实际效果等同于启用  [自动漫游模式]
+	  
+
+# 通过自动获取IP，自动定位城市（精确到市，但不能到县/区）
+IP2CITY_URL="https://ip.cn"
+#IP2CITY_URL='http://int.dpool.sina.com.cn/iplookup/iplookup.php?format=json'
+#WEATHER_URL="https://tianqi.moji.com/weather/china/hunan/changsha"
+URL_PREFIX="https://tianqi.moji.com/weather"	
+#tmp_city=`mktemp`
+declare -a city #id: 0-2
+declare -i TIMEOUT=5
+	
+## other defines	
+WEATHER_HTML=`mktemp`
+
+## added since ver 2.2; 支持显示天气对应的图标: 
+# w0.png - w46.png 如：
+# https://h5tq.moji.com/tianqi/assets/images/weather/w0.png
+# (注：中间有部分图标缺失，文件名未使用)
+
+URL_SRC="https://h5tq.moji.com/tianqi/assets/images/weather"
+PIC_SRC="/usr/share/conky-weather/pixmaps/moji-weather"
+PIC_DIR="$HOME/conky/moji-weather"
+
+## FOR option --todo
+TODO_FILE="$CONKY_DIR/todo.txt" #在 .conkyrc 中使用 head -5 命令，强制只读取文件内容的前5行
+declare -i LINE_LIMIT=5
+## ===
+
+	_usage () {
+cat<<EOF
+Usage: $APPNAME
+       $APPNAME [OPTION]
+
+定时更新 conky 天气信息
+
+Options: 
+      -i, --conkyrc    显示/修改 conky 的默认配置文件 ~/.conkyrc
+      -p, --ip2city    按IP地址定位城市, 并显示天气网址和城市名称(需要联网)。
+                       提示：能定位到城市，但不能精确到区/县
+      -a, --auto-city-url
+                   和 --ip2city 类似，但简化了内容，只显示生成的天气网址
+                   
+      -u, --auto   启用 [自动漫游] 模式。即按IP地址定位城市后，
+                   再更新天气。默认使用这种模式。
+         
+      -c, --city   启用 [自定义] 模式。即修改文件 ~/conky/conky-weather.cfg ,
+                   加入某个特定城市的天气网页地址
+      -g, --logcity
+          启用 [城市备份] 功能。如果更新天气时发现城市地址有变更，
+          则自动备份新的天气网址到文件 ~/conky/conky-weather.autocity 
+      -t, --todo   显示/修改要提醒的内容（即修改文件 ~/conky/todo.txt）。
+                   说明：只显示文件内容的前 $LINE_LIMIT 行
+      -w, --weather-code
+         显示 Conky天气相关的指令代码。用户可以复制代码并
+         添加到自己的 ~/.conkyrc 文件中，来显示 Conky天气
+
+      -v, --version    显示版本信息并退出 
+      -h, --help       显示帮助信息并退出 
+
+Bugs: 
+请发送缺陷报告给 Careone <emacslocale@126.com>. 
+
+Homepage: 
+https://sourceforge.net/projects/emacslocale/files/conky-weather/ 
+EOF
+}  
+
+	_init_conky_weather_cfg  () {
+cat<<EOF
+## $APPNAME $APPVER 
+#$WEATHER_URL
+# $CITY_STR
+#
+#https://tianqi.moji.com
+#https://tianqi.moji.com/weather/china/hunan/changsha
+#https://tianqi.moji.com/weather/china/hunan/xx-county
+#https://tianqi.moji.com/weather/china/beijing/haidian-district
+#https://tianqi.moji.com/weather/china/beijing/beijing
+### -------------------------
+## 说明：以#号开头的是注释行，仅用于对程序的用法进行说明。
+##       可以删除，不会影响程序正常运行。
+##
+## 修改conky天气的城市数据网页地址： 
+## 默认的城市: 北京 
+## 默认数据地址: https://tianqi.moji.com/ （数据来源：墨迹天气） 
+##
+## 如何获得自己所在城市的天气页面地址？ 
+## 方法： 在浏览器中，输入地址: tianqi.moji.com ，然后选择自己所在的省份，
+## 城市（或者省级市，区），确定。这时浏览器的地址栏会变成类似这样的地址： 
+##
+## https://tianqi.moji.com/weather/china/hunan/changsha 
+## https://tianqi.moji.com/weather/china/hunan/xx-county
+## https://tianqi.moji.com/weather/china/beijing/haidian-district 
+## https://tianqi.moji.com/weather/china/beijing/beijing
+## 含义：最后的三组英文字母，分别代表： 
+## 	china: 代表中国；
+## 	hunan: 代表省份的汉语拼音。这里代表“湖南”省。
+## 	changsha: 代表城市的汉语拼音。这里代表“长沙”市。
+## 	xx-county: 代表xx县。county 是指“县”的意思。 
+##	beijing/haidian-district: 代表：北京/海淀区。district 是指“区”的意思。
+##      注：直辖市(如北京，上海，天津，重庆)如果不确定是在哪个区，也可直接
+##	    连写两次城市名，如: beijing/beijing 代表"北京/北京"
+##
+## 把浏览器中显示的网页地址，复制并保存为用户主目录下的
+## conky/conky-weather.cfg 文件。 
+## 文件路径: ~/conky/conky-weather.cfg
+## 或者: $HOME/conky/conky-weather.cfg
+##
+## 最后再以普通用户运行命令 conky-weather-update 更新天气即可!
+
+EOF
+}
+
+## _make_weather_update () : 
+#   used to creat '86conky-weather-update.desktop' and
+#   save to ~/.config/autostart/ 
+#   to enable conky-weather-update autostart for each login
+	_make_weather_update () {
+cat<<EOF
+[Desktop Entry]
+Name=conky-weather-update
+Exec=/usr/local/bin/conky-weather-update
+Icon=conky-weather-update
+Terminal=yes
+Type=Application
+Categories=GNOME;GTK;System;Utility;
+Hidden=false
+EOF
+}
+
+## updated since ver 2.1
+	_show_weather_code () {
+cat<<EOF
+### -----------------
+TEXT
+\${font LCD:style=Bold:pixelsize=50}\${alignc}\${time %H:%M}\${font WenQuanYi Zen Hei:pixelsize=24}
+\${alignc}\${time %Y年%b%d日 星期%a}
+\${hr}
+\${font WenQuanYi Zen Hei:pixelsize=18}\${alignc}\${exec sed -n '3p' \$HOME/conky/conky-weather.db}
+\${font WenQuanYi Zen Hei:pixelsize=30}       \${exec sed -n '4p' \$HOME/conky/conky-weather.db} \${font WenQuanYi Zen Hei:pixelsize=18}\${exec sed -n '5p' \$HOME/conky/conky-weather.db}
+\${font WenQuanYi Zen Hei:pixelsize=14}\${exec sed -n '6p' \$HOME/conky/conky-weather.db}
+\${exec sed -n '7p' \$HOME/conky/conky-weather.db}
+\${hr}
+\${font WenQuanYi Zen Hei:pixelsize=18}\${alignc}\${exec sed -n '9p' \$HOME/conky/conky-weather.db}
+\${font WenQuanYi Zen Hei:pixelsize=18}             \${exec sed -n '10p' \$HOME/conky/conky-weather.db} \${exec sed -n '11p' \$HOME/conky/conky-weather.db} 
+             \${exec sed -n '12p' \$HOME/conky/conky-weather.db} \${exec sed -n '13p' \$HOME/conky/conky-weather.db}   空气质量: \${exec sed -n '14p' \$HOME/conky/conky-weather.db}
+\${hr}
+\${font WenQuanYi Zen Hei:pixelsize=18}\${alignc}\${exec sed -n '16p' \$HOME/conky/conky-weather.db}
+\${font WenQuanYi Zen Hei:pixelsize=18}             \${exec sed -n '17p' \$HOME/conky/conky-weather.db} \${exec sed -n '18p' \$HOME/conky/conky-weather.db}
+             \${exec sed -n '19p' \$HOME/conky/conky-weather.db} \${exec sed -n '20p' \$HOME/conky/conky-weather.db}   空气质量: \${exec sed -n '21p' \$HOME/conky/conky-weather.db}
+\${hr}
+\${font WenQuanYi Zen Hei:pixelsize=18}\${alignc}[ 提醒 ]
+\${exec head -${LINE_LIMIT} \$HOME/conky/todo.txt}
+\${hr}\${font WenQuanYi Zen Hei:pixelsize=14}
+\${color #98c2c7}主机名: \${color}\$alignr\$nodename
+\${color #98c2c7}内核:  \${color}\$alignr\$kernel
+\${color #98c2c7}已开机: \${color}\$alignr\$uptime
+\${image \$HOME/conky/moji-weather/weather-day00.png -p 0,113 -s 60x60 -n}
+\${image \$HOME/conky/moji-weather/weather-day02.png -p 0,235 -s 60x60 -n} 
+\${image \$HOME/conky/moji-weather/weather-day03.png -p 0,325 -s 60x60 -n}
+### -----------------
+EOF
+}
+
+	_creat_todo_txt () {
+cat<<EOF
+在文件 ~/conky/todo.txt 中，
+加入需要显示或提醒的事情。
+提示：最多只显示 ${LINE_LIMIT}行！
+EOF
+}
+
+## 截取“明天”和“后天”的天气数据, 显示并存入文件
+## array id: 0-5
+declare -a line_day_2nd line_day_3th
+
+## 将每一行前导的“空白字符”（空格，制表符）删除
+#sed 's/^[ \t]*//'
+#
+## 将每一行拖尾的“空白字符”（空格，制表符）删除
+#sed 's/[ \t]*$//'
+#
+## 将每一行中的前导和拖尾的空白字符删除
+#sed 's/^[ \t]*//;s/[ \t]*$//'
+
+	_feed_3days () {
+## 天气数据和对应的行数（示例）：
+# L79: XX县，省，中国
+#
+# 数据模式1：数组 line_day_2nd[@], line_day_3th[@]
+# id 0: L167 / L186: 明天（或者后天）
+# id 1: L171 / L190: 雷阵雨
+# id 2: L174 / L193: 9° / 23°
+# id 3: L176 / L195: 北风
+# id 4: L177 / L196: 3-4级
+# id 5: L180 / L199: 80 良
+# ...
+
+if [ "$DEBUG" = 1 ]; then
+  echo "  L201: LINE_MODE=$LINE_MODE"
+fi
+
+case "$LINE_MODE" in
+  1) ## for example: .../hunan/changsha
+   	line_day_2nd=( 167 171 174 176 177 180 )
+      line_day_3th=( 186 190 193 195 196 199 )
+	;;
+	## todo
+  2) ## for example: .../hunan/xx-county
+  	line_day_2nd=( 177 181 184 186 187 190 )
+      line_day_3th=( 196 200 203 205 206 209 )
+	;;
+ 3 | *) ## for example:
+# https://tianqi.moji.com/today/china/xinjiang/xinjiang-ku'erle-lotus-lake-tourism-spot
+#L72     <li>新疆库尔勒莲花湖旅游区</li>
+#L79                <em>新疆库尔勒莲花湖旅游区， 新疆维吾尔自治区， 中国</em>
+  	line_day_2nd=( 157 161 164 166 167 170 )
+      line_day_3th=( 176 180 183 185 186 189 )
+	      ;;		
+esac
+
+if [ "$DEBUG" = 1 ]; then
+  echo
+  echo "  L220: LINE_MODE=$LINE_MODE"
+  echo "  line_day_2nd[@] = ( ${line_day_2nd[*]} )"
+  echo "  line_day_3th[@] = ( ${line_day_3th[*]} )"
+  echo 
+fi
+
+sed -n "${line_day_2nd[0]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+
+#sed 's/^[ \t]*//;s/[ \t]*$//
+#sed -n "173p" "$WEATHER_HTML" | cut -d'<' -f1 | sed '/ /s///g' | tee -a "$WEATHER_DATA"
+#sed -n "${line_day_2nd[1]}p" "$WEATHER_HTML" | cut -d'<' -f1 | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "$WEATHER_DATA"
+## version 2.2 modified
+sed -n "${line_day_2nd[1]}p" "$WEATHER_HTML" | cut -d'"' -f4 | tee -a "$WEATHER_DATA"
+
+sed -n "${line_day_2nd[2]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+sed -n "${line_day_2nd[3]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+sed -n "${line_day_2nd[4]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+#
+sed -n "${line_day_2nd[5]}p" "$WEATHER_HTML" | sed 's/^[ \t]*//' | cut -d' ' -f-2 | tee -a "$WEATHER_DATA"
+
+echo | tee -a "$WEATHER_DATA"
+
+##
+# line_day_3th=( 186 190 192 195 196 199 )
+sed -n "${line_day_3th[0]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+#
+#sed -n "${line_day_3th[1]}p" "$WEATHER_HTML" | cut -d'<' -f1 | sed 's/^[ \t]*//;s/[ \t]*$//' | tee -a "$WEATHER_DATA"
+## version 2.2 modified
+sed -n "${line_day_3th[1]}p" "$WEATHER_HTML" | cut -d'"' -f4 | tee -a "$WEATHER_DATA"
+
+sed -n "${line_day_3th[2]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+sed -n "${line_day_3th[3]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+sed -n "${line_day_3th[4]}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1 | tee -a "$WEATHER_DATA"
+#
+sed -n "${line_day_3th[5]}p" "$WEATHER_HTML" | sed 's/^[ \t]*//' | cut -d' ' -f-2 | tee -a "$WEATHER_DATA"
+
+#echo | tee -a "$WEATHER_DATA"
+}
+
+## added since ver 2.2
+## line number: now=112; 	day1=152;	day2=171;	day3=190
+
+declare -a picname dayname
+dayname[0]="weather-day00.png"
+#dayname[1]="weather-day01.png"
+dayname[2]="weather-day02.png"
+dayname[3]="weather-day03.png"
+
+	_feed_weather_picname () {
+## 数组 line_pic[@]: 天气数据页面中，某一天的天气图片
+#    w0.png - w46.png 在哪一行
+declare -a line_pic
+
+case "$LINE_MODE" in
+  1) line_pic=( 112 152 171 190 ) ;;
+  2) line_pic=( 122 162 181 200 ) ;;
+  *) line_pic=( 132 172 191 210 ) ;;
+esac
+  		
+	# example for output: w2.png
+picname[0]=`sed -n "${line_pic[0]}p" "$WEATHER_HTML" | cut -d'/' -f8 | cut -d'"' -f1`
+#picname[1]=`sed -n "${line_pic[1]}p" "$WEATHER_HTML" | cut -d'/' -f8 | cut -d'"'`
+
+picname[2]=`sed -n "${line_pic[2]}p" "$WEATHER_HTML" | cut -d'/' -f8 | cut -d'"' -f1`
+picname[3]=`sed -n "${line_pic[3]}p" "$WEATHER_HTML" | cut -d'/' -f8 | cut -d'"' -f1`
+
+  echo -e "\n  更新天气图片 ( ~/conky/moji-weather/weather-day??.png )..."
+  
+  for a in 0 2 3; do
+    ## 确认 picname[@] 是否有效
+    #（主要防止因为网络慢，或者无网络导致天气数据文件缺失或不完整，
+    # 产生无效的文件名）.
+    # w44.png 为空白的透明图片。
+    case "${picname[a]}" in
+        w[0-9].png | w[0-9][0-9].png) : ;;
+    	*) picname[a]="w44.png" ;;
+    esac
+
+## TAG 374: #bugfix #180310-1001B: 
+## 如果系统目录找不到天气图片 
+#  /usr/share/conky-weather/pixmaps/moji-weather/w*.png 
+# 再到用户目录下查找 ~/conky/moji-weather/w*.png 
+# 如果还是没有，则从网上下载天气图片，保存到用户目录下
+#	~/conky/moji-weather/
+   	
+  if [ -e "$PIC_SRC/${picname[a]}" ]; then
+    # 如果系统目录下，存在天气图片
+    :
+  elif [ -e "$PIC_DIR/${picname[a]}" ]; then
+    # 或者用户目录下，存在天气图片 
+    PIC_SRC="$PIC_DIR" 
+  else # 如果还是找不到图片，则强制从网上下载天气图片
+    PIC_SRC="$PIC_DIR" 
+    wget -c -q -t 3 -T $TIMEOUT "$URL_SRC/${picname[a]}" -O "$PIC_DIR/${picname[a]}"
+  fi
+
+## 先删除旧的3天内的天气图片（实际即取消3个 weather-dayXX.png 图片的符号链接） 
+  if [ -L "$PIC_DIR/${dayname[a]}" ]; then
+    unlink "$PIC_DIR/${dayname[a]}"
+  elif [ -e "$PIC_DIR/${dayname[a]}" ]; then
+    rm -f "$PIC_DIR/${dayname[a]}"    
+  else 
+    mv -fv "$PIC_DIR/${dayname[a]}" "$PIC_DIR/${dayname[a]}.$(date +'%s')"
+  fi
+  
+  ln -s "$PIC_SRC/${picname[a]}" "$PIC_DIR/${dayname[a]}"
+done  
+}
+
+
+## 内部函数 _ip2city 的两个作用：
+# 1. 更新变量 WEATHER_URL 和  CITY_STR 
+# 2. 显示(echo) 变量 WEATHER_URL 的值。（但不会显示 CITY_STR 的值）。
+		_ip2city () {
+### TAG 365A：
+## -------------------------
+	  #echo -e "\n  通过自动获取IP，定位城市（精确到市，但不能到县/区）" 
+
+#	IP2CITY_URL="https://ip.cn"
+#	URL_PREFIX="https://tianqi.moji.com/weather"
+# sample:
+##WEATHER_URL="https://tianqi.moji.com/weather/china/hunan/changsha"
+
+    	tmp_city=`mktemp`
+
+	  #echo -e "  [提示] 需要联网到以下页面来获取城市数据！\n  ${IP2CITY_URL}\n" 
+
+## 最多连接3次（-t 3） , 超时限制为5秒（-T $TIMEOUT）
+	  wget -c -q -t 3 -T $TIMEOUT "${IP2CITY_URL}" -O "$tmp_city"
+	  
+	## 如果文件内容不为空（即能联网，而且文件下载和保存正常） 
+	if [ -s $tmp_city ]; then
+	  
+	  ## -------------------------
+	  CITY_STR=`grep "GeoIP: " ${tmp_city} | sed '/<code>/s//\n/2' | sed -n '2p' | cut -d' ' -f1`
+	  city=( `grep "GeoIP: " $tmp_city | sed '/GeoIP: /s//\n/' | sed -n '2p' | cut -d'<' -f1 | sed '/,/s///g' | tr 'A-Z' 'a-z'` )
+	  WEATHER_URL="$URL_PREFIX/${city[2]}/${city[1]}/${city[0]}"
+
+	    #echo -e "  ${CITY_STR}\t${city[*]}"   
+	    #echo -e "  对应的城市天气网页:\n  "  
+	    echo "${WEATHER_URL}"
+
+	  ## ==================== 
+	
+	else
+	  ## 无法正常下载文件（通常是无法联网）
+	  #echo "  错误 (E395): 无法联网获取IP和城市信息！请确认网络是否正常联网。"  
+	  #echo -e "  或者修改 $CONKY_DIR/${cfg[0]} 文件，手动设置城市天气页面地址。\n"  
+	  WEATHER_URL="https://tianqi.moji.com"
+	  #echo -en "  强制使用默认城市天气页面:\n  "  
+	  echo "$WEATHER_URL"
+	fi
+	  #exit 0
+### TAG 365A END：
+## -------------------------
+
+}
+
+
+#
+_tips01 () {
+cat<<EOF
+
+  提示：
+  * 如果找不到文件 conky-weather.cfg, 或者这个文件中找不到有效的网页地址，
+    程序会自动定位城市（即：每次更新天气时，会先自动联网定位城市，
+    再更新天气）;
+   
+EOF
+}
+	
+### ///HEAD ###
+
+### BODY ###
+for option in "$@"; do
+
+    case "$option" in
+      -h | --help)
+	  _usage
+	  exit 0 ;;
+
+      -i | --conkyrc)
+	  FILE="$HOME/.conkyrc" ;
+	  echo "  显示/修改 conky 的默认配置文件 ~/.conkyrc ... "
+	  if [ ! -e "$FILE" ]; then
+	    echo "  提示: 文件未找到。从模板创建新文件..."
+	    cp -f "${CW_CONKYRC}" "$FILE"
+	  fi
+	  sleep 1
+	  xdg-open "$FILE" &
+	  exit 0 ;;
+
+### new option --log-city, ver 2.4
+      ## 适用场景：
+      # 旅行或出差途中，提前自动记录沿途的天气地址。在返程时，可以手动
+      #  复制天气地址到 conky-weather.cfg 文件，来提前获取其它城市的天气
+      #  	技术原理： 
+      #  只要存在文件4 ~/conky/conky-weather.autocity；
+      # 每次更新天气时，如果有不同的城市，都会自动添加到 文件4 的开头；
+      #  如果不存在 文件4, 则不进行记录 
+      -g | --logcity)
+	  FILE="$CONKY_DIR/${cfg[3]}" ;
+	 echo "  启用 [城市备份] 功能..."
+         echo "  读取配置文件 ~/conky/${cfg[3]} ..."
+
+	  if [ ! -e "$FILE" ]; then
+	    echo > "$FILE"
+	    # 注意：文件大小如果为0, 是无法使用 sed '1iTEXT' 实现行前添加文字的功能
+	    # 因此必须用 echo 输出一个换行符到文件，而不能用 touch
+	  fi
+	  
+	  OLD_URL=`grep "^http" "$FILE" | head -1`
+	  
+	  echo -en "\n  联网自动定位城市，获取天气网址...\n  "
+	  _ip2city
+	  echo "  $CITY_STR"	
+	    
+	  ## 比对联网获得的天气网址，是否与文件中最近一次的天气网址相同。
+	  #   如果相同，则忽略；如果不同，且不是默认地址，则添加到文件4的开头。
+	  #   每1次添加时，都会有4行内容（时间，网址，城市名称，再加一个空行）
+	  if [ "$WEATHER_URL" = "$DEFAULT_PAGE" ]; then
+	    echo -e "\n  提示: 忽略默认的天气网址: ${DEFAULT_PAGE} [北京市]..."
+	  elif [ "$WEATHER_URL" = "$OLD_URL" ]; then
+	    echo -e "\n  提示: 没有新的城市天气网址需要更新！"
+	  else 
+	    echo -e "\n  更新配置文件 ~/conky/${cfg[3]} ..."
+	    sed -i "1i# $(date)\n${WEATHER_URL}\n# ${CITY_STR}\n" "$FILE"
+	  fi
+
+	  echo -e "\n  显示最近2次的天气网址数据\n  ---------------- "
+	  head -7 "$FILE"
+	  echo "  ---------------- "
+	  exit 0 ;;
+  
+      -p | --ip2city)
+
+### TAG 365B：
+## -------------------------
+	  echo "  通过自动获取IP，定位城市（精确到市，但不能到县/区）"
+
+
+#	IP2CITY_URL="https://ip.cn"
+##WEATHER_URL="https://tianqi.moji.com/weather/china/hunan/changsha"
+#	URL_PREFIX="https://tianqi.moji.com/weather"	
+    	tmp_city=`mktemp`
+	  
+## 方案1（使用中）	  
+#https://ip.cn
+#$ cat -n 002.ip | grep GeoIP
+#    40		<div id="result"><div class="well"><p>您现在的 IP：<code>192.168.1.253</code></p><p>所在地理位置：#<code>湖南省长沙市 移动</code></p><p>GeoIP: Changsha, Hunan, China</p></div></div>
+#
+# cat -n 002.ip | grep "GeoIP: " | sed '/GeoIP: /s//\n/' | sed -n '2p' | cut -d'<' -f1
+# Changsha, Hunan, China
+# city[0],	city[1],	city[2]
+
+	  echo -e "  [提示] 需要联网到以下页面来获取城市数据！\n  ${IP2CITY_URL}\n"
+
+### wget [option]	  
+#   -t,  --tries=数字                设置重试次数为 <数字> (0 代表无限制)
+#       --retry-connrefused         即使拒绝连接也是重试
+# 
+#  -T,  --timeout=SECONDS           将所有超时设为 SECONDS 秒
+#       --dns-timeout=SECS          设置 DNS 查寻超时为 SECS 秒
+#       --connect-timeout=SECS      设置连接超时为 SECS 秒
+#       --read-timeout=SECS         设置读取超时为 SECS 秒
+#  -w,  --wait=SECONDS              等待间隔为 SECONDS 秒
+#       --waitretry=SECONDS         在获取文件的重试期间等待 1..SECONDS 秒
+#       --random-wait               获取多个文件时，每次随机等待间隔 (0.5~1.5)*WAIT 秒
+
+## 最多连接3次（-t 3） , 超时限制为5秒（-T $TIMEOUT）
+	  wget -c -t 3 -T $TIMEOUT "${IP2CITY_URL}" -O "$tmp_city"
+	  
+	if [ -s $tmp_city ]; then
+	  
+	  ## -------------------------
+	  CITY_STR=`grep "GeoIP: " ${tmp_city} | sed '/<code>/s//\n/2' | sed -n '2p' | cut -d' ' -f1`
+	  city=( `grep "GeoIP: " $tmp_city | sed '/GeoIP: /s//\n/' | sed -n '2p' | cut -d'<' -f1 | sed '/,/s///g' | tr 'A-Z' 'a-z'` )
+	  WEATHER_URL="$URL_PREFIX/${city[2]}/${city[1]}/${city[0]}"
+	  
+	  if [  "$DEBUG" = 1 ]; then
+	     echo -e "\n  L378: \n  CITY_STR=${CITY_STR}\n  #city[@]=${#city[@]}\t  city[*]=( ${city[*]} )"
+	     echo -e "  WEATHER_URL:\n  ${WEATHER_URL}"
+	  else
+	    echo -e "  城市: ${CITY_STR}\t${city[*]}"  
+	    echo -e "  城市天气网址:\n  ${WEATHER_URL}"	    
+	  fi
+	  ## ==================== 
+	
+	else
+	  echo "  错误 (E395): 无法联网获取IP和城市信息！请确认网络是否正常联网。"
+	  echo -e "  或者修改 ~/conky/${cfg[0]} 文件，手动设置城市天气网址。\n"
+	  WEATHER_URL="https://tianqi.moji.com"
+	  echo -e "  强制使用默认城市（北京市）的天气网址:\n  $WEATHER_URL"
+	fi
+	  exit 0
+### TAG 365B END：
+## -------------------------
+	   ;;
+	   
+	-a | --auto-city-url) 
+	## 根据IP地址，联网解析后，输出对应城市的天气网页地址，如
+	#   https://tianqi.moji.com/weather/china/hunan/changsha   
+	_ip2city
+	exit 0       
+	       ;;
+
+### new option --auto: ver 2.4 added
+	-u | --auto) 
+	URL_MODE="autocity"
+	## 启用 [自动漫游] 模式。先禁用配置文件 ~/conky/conky-weather.cfg 的数据， 
+	# 再运行内部函数 _ip2city 更新变量 WEATHER_URL 和  CITY_STR 
+	
+       echo -e "  启用 [自动漫游] 模式...\n"
+       
+       ## 情况101：如果存在配置文件 conky-weather.cfg
+       ## 在所有以 http 开头的行前，通过添加 # 号，禁用这一行数据
+     if [ -s "$CONKY_DIR/${cfg[0]}" ]; then
+
+         echo -e "  禁用配置文件 ~/conky/${cfg[0]} 中的数据...\n"
+         sed -i "/^http/s//#&/" "$CONKY_DIR/${cfg[0]}"
+         echo -en "  联网并自动定位，解析天气网址...\n  "
+         _ip2city
+          echo "  $CITY_STR"
+      else
+        ## 情况102：不存在配置文件
+        # 则先运行内部函数 _ip2city 更新 WEATHER_URL 和 CITY_STR变量，
+        # 再按模板生成带有"禁用行"的文件  conky-weather.cfg
+        echo -en "  "
+        _ip2city
+        echo "  $CITY_STR"
+      _init_conky_weather_cfg > "$CONKY_DIR/${cfg[0]}"
+      fi
+	break 
+	## 跳出 for ... done 的 options 循环，继续后面的天气更新操作
+	       ;;
+	       
+### option --city: ver 2.4 updated
+      -c | --city)
+	URL_MODE="custom"
+	## 启用 [自定义] 模式。优先读取配置文件 ~/conky/conky-weather.cfg
+        echo -e "  启用 [自定义] 模式..."
+       	  FILE="$CONKY_DIR/${cfg[0]}" ;
+ 	  
+	  echo "  修改conky天气的配置文件 ~/conky/${cfg[0]}"
+	  echo -e "  （如修改为指定城市的天气网页地址）...\n"
+
+	  if [ ! -e "$FILE" ]; then
+	    echo "  提示: 文件 ${cfg[0]} 未找到！"
+	    echo "  根据IP地址定位城市和天气网址，自动保存到文件 ${cfg[0]} ..."
+		
+ 	    #_tips01
+ 	    	    
+ 	    #内部函数 _ip2city 的输出，就是变量 WEATHER_URL 的值
+	     echo -en "  "
+	     _ip2city
+	     echo "  $CITY_STR"
+	   _init_conky_weather_cfg > "$CONKY_DIR/${cfg[0]}"
+	  
+	  else
+	    grep "^http" "$FILE" | head -1   
+	    #grep "^http" "$CONKY_DIR/${cfg[0]}" | head -1   
+	  fi
+	  
+	  echo
+
+	  sleep 1
+	  #xdg-open "$FILE" &
+	  xdg-open "$FILE" 	  
+	break 
+	## 跳出 for ... done 的 options 循环，继续后面的天气更新操作	  
+	  #exit 0
+	   ;;
+
+      -t | --todo)
+	  FILE="$TODO_FILE"
+	  echo "  显示/修改要提醒的内容（即修改文件 ~/conky/todo.txt）... "
+	  echo "  说明：只显示文件内容的前 $LINE_LIMIT 行"	  
+	  if [ ! -e "$FILE" ]; then
+	    echo "  提示: 文件未找到。从模板创建新文件..."
+	    _creat_todo_file > "$FILE"
+	  fi
+	  echo "  ---------- "
+	  head -${LINE_LIMIT} "$FILE"
+	  echo "  ---------- "
+	  sleep 1
+	  xdg-open "$FILE" &
+	  exit 0 ;;
+	  	  	  
+     	-w | --weather-code)
+	   echo -e "  提示:\n  用户可以复制下面的代码, 添加到自己的~/.conkyrc 文件中，"
+	   echo -e "  来显示三天内的 Conky天气（包括：今天、明天、后天）\n"
+	   _show_weather_code
+	   #echo
+	   #gedit "$HOME/.conkyrc" &
+	   exit 0 ;;
+
+    	-v | --version)
+	  echo "$APPNAME $APPVER"
+	  exit 0 ;;
+
+    	-*)
+	  echo "Unrecognized option \`$option'" 1>&2
+	  exit 1 ;;
+    esac
+
+done
+
+if [ ! -d "$CONKY_DIR" ]; then
+  mkdir -p "$CONKY_DIR"
+fi
+
+if [ ! -d "$PIC_DIR" ]; then
+  mkdir -p "$PIC_DIR"
+fi
+
+if [ ! -e "$TODO_FILE" ]; then
+  echo "  创建默认的提醒文件: ~/conky/todo.txt" 
+  _creat_todo_txt > "$TODO_FILE" 
+fi
+
+#
+if [ ! -d "$AUTOSTART_DIR" ]; then
+  mkdir -p "$AUTOSTART_DIR"
+fi
+
+### ============ ready ============ ###
+## 读取用户自己的城市/县城天气网页地址，如：
+# https://tianqi.moji.com/weather/china/hunan/changsha   (含义: 中国/湖南/长沙)
+# https://tianqi.moji.com/weather/china/hunan/xx-county  (含义: 中国/湖南/xx县)
+
+echo -e "\n  更新 Conky天气数据 (命令: $APPNAME )...\n"
+
+### ---------------- TAG 677 begin ------
+if [ "$URL_MODE" = "autocity" ]; then
+  ## 如果是 [自动漫游] 模式，在选项 --auto 中已经提前得到了最新的 
+  #  WEATHER_URL 天气地址变量，可以直接下载数据并解析天气了； 
+  	: 
+else
+   ## 如果是 [自定义] 模式，或者默认模式
+       echo -e "  读取城市天气的默认配置文件: ~/conky/${cfg[0]} ..."
+       
+	## ---------------- TAG 685A: ----
+       ## 情况1：如果存在配置文件 conky-weather.cfg
+       if [ -s "$CONKY_DIR/${cfg[0]}" ]; then
+         WEATHER_URL=`grep "^http" "$CONKY_DIR/${cfg[0]}" | head -1`
+ 
+ 	## ========= TAG 690 BEGIN ============        
+         ## 确认文件内是否存在有效数据
+         case "$WEATHER_URL" in
+		'' |  "https://tianqi.moji.com")
+## 情况1.1: 文件存在，但没有有效天气数据。如空文件，
+#  或天气数据行被禁用（如每行的开头带有 # 符号），
+#  或者是无网络连接时，得到的默认地址  https://tianqi.moji.com/weather 
+#  对应的城市为北京市。
+		echo "  提示: 未找到有效的天气网址数据 ( ${cfg[0]} )！"
+		echo "  提示: 忽略默认的天气网址: ${DEFAULT_PAGE} [北京市]..."
+		echo -e "  自动定位城市，并获取天气网址（需要连接网络）...\n  "
+		_ip2city 
+	     echo "  $CITY_STR"
+	     		
+###  内部函数 _ip2city : 先联网并读取IP地址，解析出城市天气网页地址，
+## 并再次保存到（更新）变量 WEATHER_URL 。如果这时无法连接网络，会使用默认
+## 地址 https://tianqi.moji.com ，对应的城市为北京市。
+## 说明1：程序只有在以下几种情况下，才会自动对 配置文件1 进行修改。
+#      	如果没有读取到有效数据，会自动联网，解析出 IP 对应城市的天气地址，
+#		相当于自动进入 [自动漫游] 模式；
+# 配置文件1: ~/conky/conky-weather.cfg
+# 1. 文件不存在，则调用内部函数 _init_conky_weather_cfg 自动生成文件; 
+# 2. 在使用 --auto 选项时，会自动禁用 文件1 中的有效数据行； 
+#
+#   说明2:
+# 从版本2.4起，默认生成的文件1中，所有的城市地址都是被禁用的，
+# 以实现出差漫游/旅行时，能根据 IP 自动定位城市）
+		;;
+
+		http* | *)
+	 ## 情况1.2: 文件存在，且能找到有效的天气数据。则显示天气数据，不再做其它修改		
+		echo -e "  当前使用的天气网址:\n  $WEATHER_URL\n  $CITY_STR\n"
+
+		;;
+	esac
+## ========= TAG 690 END ============        
+ 
+	## ---------------- TAG 685B: ----
+	else 
+## 情况2：如果不存在配置文件 conky-weather.cfg，则重新生成此文件	
+	echo -e "  提示: 未找到配置文件 ~/conky/${cfg[0]} !\n  自动生成文件 ${cfg[0]} ..."
+		echo -en "  当前使用的天气网址:\n  "
+		_ip2city	
+		echo "  $CITY_STR"		
+       	_init_conky_weather_cfg > "$CONKY_DIR/${cfg[0]}"
+
+        fi
+	## ---------------- TAG 685C: =END ----
+
+fi
+### ---------------- TAG 677 END ------
+
+echo
+
+
+## 下载天气页面的 html 文件，以便后面进行数据提取。示例：
+# 
+#https://tianqi.moji.com/weather/china/hunan/changsha
+#wget -q https://tianqi.moji.com/ -O tqym
+#wget -q https://tianqi.moji.com/weather/china/hunan/changsha -O tqym
+wget -c -q -t 3 -T $TIMEOUT "${WEATHER_URL}" -O "$WEATHER_HTML"
+
+	### --------------------- TAG 815:
+	### 联网异常时，对旧的天气数据的处理方案：	
+	## 1. 如果联网失败，无法下载天气数据文件（即文件大小为0），
+	#   	可能要保留旧的天气数据, 并取消本次天气更新：
+	#  （如果文件修改日期 = 今天，则确定要保留文件，再取消本次天气更新；
+	#	否则强制清空文件，并取消本次天气更新）
+	#
+
+	## STR_TODAY，STR_ANYDAY 变量示例(年，月，日)：( 2018_02_28 )
+	STR_ANYDAY=`ls -l --time-style +_%Y_%m_%d_ "$CONKY_DIR/${cfg[1]}" | cut -d'_' -f2-4`
+	STR_TODAY="$(date +'%Y_%m_%d')"
+		
+	if [ ! -s "$WEATHER_HTML" ]; then
+	  NEED_UPDATE=0
+	  
+	  echo -e "  警告: 网络连接异常！无法正常下载数据！"
+		if [ "$STR_ANYDAY" = "$STR_TODAY" ]; then
+		  KEEP_DATA=1; 
+		  echo  "  保留今天的天气数据..."
+		  echo "  天气数据文件: ~/conky/${cfg[1]}"
+
+		else KEEP_DATA=0;
+		  echo  "  清除旧的天气数据..."		
+		fi
+	else 
+	## 如果联网正常，则清空旧的天气数据，并进行后面的更新操作
+	  KEEP_DATA=0; NEED_UPDATE=1	
+	fi
+	### ---------------------
+
+	if [ "$DEBUG" = 1 ]; then
+	  ls -l $WEATHER_HTML
+	  echo -e "  L800:  STR_TODAY=$STR_TODAY\n\tSTR_ANYDAY=$STR_ANYDAY"
+	  echo -e "  \tKEEP_DATA=$KEEP_DATA\n\tNEED_UPDATE=$NEED_UPDATE"
+	fi
+	
+if [ "$KEEP_DATA" != 1 ]; then
+## 清空旧的（过期的）天气数据文件，防止过期的天气数据误导用户
+  : > "$WEATHER_DATA"
+fi
+
+if [ "$NEED_UPDATE" = 1 ]; then
+  :
+else
+  echo  "  提示: 取消本次天气更新！"
+  exit 0;
+fi
+	
+date | tee -a "$WEATHER_DATA"
+echo '获取天气信息, 请稍候...' | tee -a "$WEATHER_DATA"
+sleep 2
+
+### --------------------------------
+#
+#a=111 ; b=113 ; c=122 ; d=155 ; e=117 ; f=118
+#L_UPTIME=114; 
+
+## samples:
+# 数据模式1（城市对应的行号和数据格式）
+#72:    <li>长沙市</li>
+#79:                <em>长沙市， 湖南省， 中国</em>
+# -------
+# 数据模式2
+#66:    <div class="city">长沙市</div>
+#82:                    <a>长沙市</a>
+# -------
+# 数据模式3
+#
+#101:            <em>6</em>
+#102:            <span><img src="https://h5tq.moji.com/tianqi/assets/images/weather/w1.png" alt="少云"></span>
+#103:            <b>少云</b>
+#104:            <strong class="info_uptime">今天13:00更新</strong>
+#105:        </div>
+#106:        <div class="wea_about clearfix">
+#107:            <span>湿度 40%</span>
+#108:            <em>西风2级</em>
+#109:                    </div>
+#110:        <div class="wea_tips clearfix">
+#111:            <span>今日天气提示</span>
+#112:            <em>天气干冷，穿厚一点吧！</em>
+### =====================
+#6:        <meta name="description" content="长沙市今天实况：27度 多云，湿度：58%，西南风：2级。白天：28度,中雨。 夜间：雷阵雨，9度，天气较热，墨迹天气建议您选择短袖上衣加七分裤的搭配，针织衫是进出空调房的必备单品。">
+### ============= 
+
+## 天气数据所在的行，可能有3种或更多种情况，需要先确认，再解析数据。
+## pd: PanDuan 判断
+#pd=`sed -n '108p' "$WEATHER_HTML" | grep li`
+
+## a-f: line numbers in file $WEATHER_HTML
+#LINE_MODE=1
+
+declare -a line_uptime=( 124 114 124 104 134 ) 
+declare -a line_day_1st #id: 0-7
+declare -i MODES=4
+
+for a in `seq 1 $MODES`; do
+#until [ "$pd" !='' ]; do
+  case "$a" in
+     1) LINE_TEST=108
+        pd=`sed -n "${LINE_TEST}p" "$WEATHER_HTML" | grep li`
+        
+	if  [ "$pd" = '' ]; then
+	  L_UPTIME=114;
+	  # L_UPTIME=104;  
+     	  #a=111 ; b=113 ; c=122 ; d=155 ; e=117 ; f=118
+     	  line_day_1st=( 111 113 122 155 72 105 117 118 )
+	  #line_day_1st=( 101 144 112 145 72 104 107 108 )
+     	   LINE_MODE=1; break
+	else echo "  [信息] 切换到数据模式2, 重新解析数据..."
+	continue;  	
+	fi
+	;;
+   2) LINE_TEST=118
+        pd=`sed -n "${LINE_TEST}p" "$WEATHER_HTML" | grep li`
+        
+	if  [ "$pd" = '' ]; then
+	  L_UPTIME=124; 
+  	  #a=121 ; b=123 ; c=132 ; d=165 ; e=127 ; f=128
+  	  line_day_1st=( 121 123 132 165 72 105 127 128 )
+  	  LINE_MODE=2
+	  break
+	else echo "  [信息] 切换到数据模式3, 重新解析数据..."
+	  continue;  	
+	fi
+  	;;
+  	
+   3) ## 调试中，待确认
+   LINE_TEST=98
+        pd=`sed -n "${LINE_TEST}p" "$WEATHER_HTML" | grep li`
+        
+	if  [ "$pd" = '' ]; then
+	  L_UPTIME=104; 
+  	  #a=121 ; b=123 ; c=132 ; d=165 ; e=127 ; f=128
+  	  line_day_1st=( 101 103 112 145 72 105 107 108 )
+  	  LINE_MODE=3
+	  break
+	else echo "  [信息] 切换到数据模式4, 重新解析数据..."
+	  continue;  	
+	fi
+  	;;
+  4 | *) LINE_TEST=128
+   	 pd=`sed -n "${LINE_TEST}p" "$WEATHER_HTML" | grep li`
+        
+	if  [ "$pd" = '' ]; then
+	  L_UPTIME=134; 
+   	  #a=131 ; b=133 ; c=142 ; d=175 ; e=137 ; f=138
+	  line_day_1st=( 131 133 142 175 72 105 137 138 )
+	  LINE_MODE=4
+	  #break
+	  
+	else echo "  错误: 无效的天气页面文件。可能是解析模式错误（没有在指定的行
+	  \找到数据），或者网络异常导致无法正常下载天气数据！" 1>&2
+	  exit 0;   	
+	fi
+	    	;; 	
+    esac
+done    
+
+#
+if [ "$DEBUG" = 1 ]; then
+  echo
+  echo "  L585: LINE_MODE=$LINE_MODE"
+  echo "  line_day_1st[*] = ( ${line_day_1st[*]} )"
+  #echo "  line_city[*] = ( ${line_city[*]} )"
+  echo "  line_uptime[*] = ( ${line_uptime[*]} )"
+  echo 
+fi
+
+#line_day_1st=(  )
+### ----------------
+# id 0: wd=WenDu 温度; 	a
+# id 1: tq=TianQi 天气;	b 
+# id 2 by=BuYi 不宜; 	c 
+# id 3 wc=WenCha 温差	d
+#
+# id 4 dq=DaQi 大气;  	
+# id 5 kqzl=KongQiZhiLiang 空气质量; 	
+# id 6 sd=ShiDu 湿度;	e
+# id 7 fl=FengLi 风力;	f
+### ----------------
+
+wd=`sed -n "${line_day_1st[0]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+tq=`sed -n "${line_day_1st[1]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' `
+by=`sed -n "${line_day_1st[2]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+wc=`sed -n "${line_day_1st[3]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' `
+
+dq=`sed -n "${line_day_1st[4]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+kqzl=`sed -n "${line_day_1st[5]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' | awk '{print $1 $2}'`
+
+sd=`sed -n "${line_day_1st[6]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' | awk '{print $1 $2}'`
+fl=`sed -n "${line_day_1st[7]}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+
+UPTIME="`sed -n "${L_UPTIME}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`"
+
+## -------------------
+#wd=`sed -n "${a}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+#tq=`sed -n "${b}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' `
+#by=`sed -n "${c}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+#wc=`sed -n "${d}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' `
+#dq=`sed -n "72p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+#kqzl=`sed -n "105p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' | awk '{print $1 $2}'`
+#sd=`sed -n "${e}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}' | awk '{print $1 $2}'`
+#fl=`sed -n "${f}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`
+
+#UPTIME="`sed -n "${L_UPTIME}p" "$WEATHER_HTML" | awk -F'>' '{print $2}' | awk -F'<' '{print $1}'`"
+## -------------------
+
+## CITY 城市数据所在的行号（默认使用第72行）:
+# 66（市）,82（市）; 
+# 或者： 72（县，或者城市）,79(县，省，中国)。
+
+#declare -a line_city=( 79 72 66 82 )
+declare -a line_city=( 72 79 66 82 )
+
+for a in "${line_city[@]}"; do
+  CITY="`sed -n "${a}p" "$WEATHER_HTML" | cut -d'>' -f2 | cut -d'<' -f1`"
+  
+  ## 如果获取的城市的名称无效或空白，则尝试从其它行获取城市名称
+  case "$CITY" in
+	'' | .) # echo "  L447: CITY='$CITY'"
+	continue; ;;
+	..* | *) : ; break ;;
+  esac
+done	
+	
+#rm -fr "$WEATHER_HTML"
+
+echo
+
+echo -e "$CITY" | tee -a "$WEATHER_DATA"
+echo -e "$wd°"  | tee -a "$WEATHER_DATA"
+echo -e "$tq    $wc" | tee -a "$WEATHER_DATA"
+
+echo -e "空气质量：$kqzl    $fl    $sd\n$by　 [ ${UPTIME} ]\n" | tee -a "$WEATHER_DATA"
+## ====================
+
+
+### ---- added since version 2.1  ----
+_feed_3days
+
+### ---- added since version 2.2  ----
+## 创建天气对应的图片文件的符号链接, 如：
+# 图片原始目录: /usr/share/conky-weather/pixmaps/moji-weather/
+# 保存到:
+# ~/conky/moji-weather/weather-day00.png
+# 	weather-day02.png, weather-day03.png 
+_feed_weather_picname
+
+### ===================
+
+## version 1.4 added:
+echo
+
+	WEATHER_UPDATE_DESKTOP="86conky-weather-update.desktop"
+  if [ ! -e "$AUTOSTART_DIR/$WEATHER_UPDATE_DESKTOP" ]; then
+	if [ ! -d "$AUTOSTART_DIR" ]; then
+	  mkdir -p "$AUTOSTART_DIR"
+	fi  
+	echo "  * 生成 $APPNAME 开机自启动项（开机后立即更新天气一次）..."
+	_make_weather_update > "$AUTOSTART_DIR/$WEATHER_UPDATE_DESKTOP"
+  else echo -e "  * 提示: 已存在 $APPNAME 自启动项:\n  $AUTOSTART_DIR/$WEATHER_UPDATE_DESKTOP"
+         #echo -e "\tOK."
+  fi
+
+exit 0;
+
